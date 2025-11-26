@@ -1,0 +1,101 @@
+<mat-toolbar class="header-wrapper">
+  <div class="header-content">
+    <div *ngIf="authService.labelPolicyLoading$ | async; else logo" class="logo-placeholder">
+      <mat-spinner [diameter]="20"></mat-spinner>
+    </div>
+    <ng-template #logo>
+      <a
+        class="title custom"
+        [routerLink]="(['iam.read', 'iam.policy.read'] | hasRole | async) ? ['/'] : ['/org']"
+        *ngIf="authService.labelpolicy$ | async as lP; else defaultHome"
+      >
+        <img
+          class="logo"
+          alt="home logo"
+          *ngIf="isDarkTheme; else customlighttheme"
+          [src]="lP.iconUrlDark ? lP.iconUrlDark : './assets/images/zitadel-logo-solo-light.svg'"
+          (error)="errorHandler($event, './assets/images/zitadel-logo-solo-light.svg')"
+        />
+        <ng-template #customlighttheme>
+          <img
+            alt="home logo"
+            class="logo"
+            [src]="lP.iconUrl ? lP.iconUrl : './assets/images/zitadel-logo-solo-dark.svg'"
+            (error)="errorHandler($event, './assets/images/zitadel-logo-solo-dark.svg')"
+          />
+        </ng-template>
+      </a>
+    </ng-template>
+
+    <ng-template #defaultHome>
+      <a class="title" [routerLink]="(authService.zitadelPermissions | async)?.length ? ['/'] : ['/users', 'me']">
+        <img
+          class="logo"
+          alt="zitadel logo"
+          *ngIf="isDarkTheme; else lighttheme"
+          src="./assets/images/zitadel-logo-solo-light.svg"
+        />
+        <ng-template #lighttheme>
+          <img alt="zitadel logo" class="logo" src="./assets/images/zitadel-logo-solo-dark.svg" />
+        </ng-template>
+      </a>
+    </ng-template>
+
+    <cnsl-new-header></cnsl-new-header>
+
+    <span class="fill-space"></span>
+
+    <ng-container *ngIf="authService.privacypolicy$ | async as pP">
+      <a class="custom-link" *ngIf="pP.customLink" href="{{ pP.customLink }}" mat-stroked-button target="_blank">
+        {{ pP.customLinkText }}
+      </a>
+
+      <a class="doc-link" *ngIf="pP.docsLink" href="{{ pP.docsLink }}" mat-stroked-button target="_blank">
+        {{ 'MENU.DOCUMENTATION' | translate }}
+      </a>
+    </ng-container>
+
+    <ng-container *ngIf="user && user.id">
+      <div class="account-card-wrapper">
+        <button
+          cdkOverlayOrigin
+          #accounttrigger="cdkOverlayOrigin"
+          class="icon-container"
+          (click)="showAccount = !showAccount"
+          [ngClass]="{ 'iam-user': (['iam.write$'] | hasRole | async) }"
+        >
+          <cnsl-avatar
+            id="avatartoggle"
+            class="avatar-toggle dontcloseonclick"
+            [active]="showAccount"
+            [avatarUrl]="user.human?.profile?.avatarUrl || ''"
+            [forColor]="user.preferredLoginName || ''"
+            [name]="user.human?.profile?.displayName ?? ''"
+            [size]="38"
+          >
+          </cnsl-avatar>
+        </button>
+      </div>
+      <ng-template
+        cdkConnectedOverlay
+        [cdkConnectedOverlayOrigin]="accounttrigger"
+        [cdkConnectedOverlayOffsetY]="10"
+        [cdkConnectedOverlayHasBackdrop]="true"
+        [cdkConnectedOverlayPositions]="accountCardPositions"
+        cdkConnectedOverlayBackdropClass="transparent-backdrop"
+        [cdkConnectedOverlayOpen]="showAccount"
+        (backdropClick)="showAccount = false"
+        (detach)="showAccount = false"
+      >
+        <cnsl-accounts-card
+          class="a_card"
+          *ngIf="showAccount"
+          (closedCard)="showAccount = false"
+          [user]="user"
+          [iamuser]="['iam.write$'] | hasRole | async"
+        >
+        </cnsl-accounts-card>
+      </ng-template>
+    </ng-container>
+  </div>
+</mat-toolbar>
