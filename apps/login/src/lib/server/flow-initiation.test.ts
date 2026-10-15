@@ -243,7 +243,9 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [otherOrgSession] as any,
-        sessionCookies: [{ id: "session-other", token: "tok" }],
+        sessionCookies: [
+          { id: "session-other", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" },
+        ],
       }),
     );
 
@@ -270,7 +272,9 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [otherOrgSession] as any,
-        sessionCookies: [{ id: "session-other", token: "tok" }],
+        sessionCookies: [
+          { id: "session-other", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" },
+        ],
       }),
     );
 
@@ -296,7 +300,9 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [otherOrgSession] as any,
-        sessionCookies: [{ id: "session-other", token: "tok" }],
+        sessionCookies: [
+          { id: "session-other", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" },
+        ],
       }),
     );
 
@@ -321,7 +327,7 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [orgSession] as any,
-        sessionCookies: [{ id: "session-org", token: "tok" }],
+        sessionCookies: [{ id: "session-org", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" }],
       }),
     );
 
@@ -351,7 +357,9 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [otherOrgSession] as any,
-        sessionCookies: [{ id: "session-other", token: "tok" }],
+        sessionCookies: [
+          { id: "session-other", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" },
+        ],
       }),
     );
 
@@ -378,7 +386,9 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [otherOrgSession] as any,
-        sessionCookies: [{ id: "session-other", token: "tok" }],
+        sessionCookies: [
+          { id: "session-other", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" },
+        ],
       }),
     );
 
@@ -405,7 +415,9 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [otherOrgSession] as any,
-        sessionCookies: [{ id: "session-other", token: "tok" }],
+        sessionCookies: [
+          { id: "session-other", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" },
+        ],
       }),
     );
 
@@ -430,7 +442,7 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
     const res = await handleOIDCFlowInitiation(
       makeBaseParams({
         sessions: [orgSession] as any,
-        sessionCookies: [{ id: "session-org", token: "tok" }],
+        sessionCookies: [{ id: "session-org", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" }],
       }),
     );
 
@@ -646,6 +658,172 @@ describe("handleOIDCFlowInitiation — org-scoped session filtering", () => {
   });
 });
 
+describe("handleOIDCFlowInitiation — stale session cookie fallback (#12252)", () => {
+  let mockGetAuthRequest: ReturnType<typeof vi.fn>;
+  let mockConstructUrl: ReturnType<typeof vi.fn>;
+  let mockFindValidSession: ReturnType<typeof vi.fn>;
+  let mockSendLoginname: ReturnType<typeof vi.fn>;
+
+  // Cookie entries left behind after an RP-initiated logout terminated the
+  // server-side sessions: no live Session objects, but loginName is still known.
+  const staleOrgCookie = {
+    id: "session-stale-org",
+    token: "tok",
+    loginName: "user@org.com",
+    organization: "111111",
+    creationTs: "",
+    expirationTs: "",
+    changeTs: "",
+  };
+  const staleOtherOrgCookie = {
+    id: "session-stale-other",
+    token: "tok",
+    loginName: "user@other.com",
+    organization: "999999",
+    creationTs: "",
+    expirationTs: "",
+    changeTs: "",
+  };
+  const otherOrgSession = {
+    id: "session-other",
+    factors: { user: { id: "user2", organizationId: "999999", loginName: "user@other.com" } },
+  };
+
+  function authRequestWith(overrides: Record<string, unknown>) {
+    mockGetAuthRequest.mockResolvedValue({
+      authRequest: {
+        id: "abc123",
+        uiLocales: [],
+        scope: [],
+        prompt: [],
+        loginHint: undefined,
+        ...overrides,
+      },
+    });
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+
+    const zitadel = await import("@/lib/zitadel");
+    const serviceUrl = await import("@/lib/service-url");
+    const session = await import("@/lib/session");
+    const authUtils = await import("@/lib/auth-utils");
+    const loginname = await import("@/lib/server/loginname");
+
+    mockGetAuthRequest = vi.mocked(zitadel.getAuthRequest);
+    mockConstructUrl = vi.mocked(serviceUrl.constructUrl);
+    mockFindValidSession = vi.mocked(session.findValidSession);
+    mockSendLoginname = vi.mocked(loginname.sendLoginname);
+    vi.mocked(zitadel.getLoginSettings).mockResolvedValue(undefined);
+    vi.mocked(zitadel.getSecuritySettings).mockResolvedValue(undefined);
+    vi.mocked(authUtils.getValidLocaleFromUILocales).mockReturnValue(null);
+
+    mockConstructUrl.mockImplementation((_req: any, path: string) => {
+      return new URL(`https://example.com${path}`);
+    });
+
+    mockFindValidSession.mockResolvedValue(null);
+    mockSendLoginname.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  test("should redirect to /accounts when there are no live sessions but the cookie references an account", async () => {
+    authRequestWith({});
+
+    const res = await handleOIDCFlowInitiation(makeBaseParams({ sessions: [], sessionCookies: [staleOrgCookie] }));
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/accounts");
+    expect(location).not.toContain("/loginname");
+  });
+
+  test("should ignore cookie entries without a loginName", async () => {
+    authRequestWith({});
+
+    const res = await handleOIDCFlowInitiation(
+      makeBaseParams({ sessions: [], sessionCookies: [{ ...staleOrgCookie, loginName: "" }] }),
+    );
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/loginname");
+  });
+
+  test("should prefer login_hint over the cookie fallback when there are no live sessions", async () => {
+    authRequestWith({ loginHint: "hinted@org.com" });
+    mockSendLoginname.mockResolvedValue({ redirect: "/password?requestId=oidc_abc123" });
+
+    const res = await handleOIDCFlowInitiation(makeBaseParams({ sessions: [], sessionCookies: [staleOrgCookie] }));
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/password");
+    expect(location).not.toContain("/accounts");
+  });
+
+  test("should not show the account picker for prompt=none even if the cookie references an account", async () => {
+    const { Prompt } = await import("@zitadel/proto/zitadel/oidc/v2/authorization_pb");
+    authRequestWith({ prompt: [Prompt.NONE] });
+
+    const res = await handleOIDCFlowInitiation(makeBaseParams({ sessions: [], sessionCookies: [staleOrgCookie] }));
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).not.toContain("/accounts");
+  });
+
+  test("should redirect to /loginname when the cookie account belongs to a different org than the org scope", async () => {
+    authRequestWith({ scope: ["urn:zitadel:iam:org:id:111111"] });
+
+    const res = await handleOIDCFlowInitiation(makeBaseParams({ sessions: [], sessionCookies: [staleOtherOrgCookie] }));
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/loginname");
+    expect(location).not.toContain("/accounts");
+  });
+
+  test("should redirect to /accounts when the cookie account matches the org scope", async () => {
+    authRequestWith({ scope: ["urn:zitadel:iam:org:id:111111"] });
+
+    const res = await handleOIDCFlowInitiation(makeBaseParams({ sessions: [], sessionCookies: [staleOrgCookie] }));
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/accounts");
+    expect(location).toContain("organization=111111");
+  });
+
+  test("should keep /accounts for SELECT_ACCOUNT when live sessions are filtered out by org but the cookie has a matching account", async () => {
+    const { Prompt } = await import("@zitadel/proto/zitadel/oidc/v2/authorization_pb");
+    authRequestWith({ scope: ["urn:zitadel:iam:org:id:111111"], prompt: [Prompt.SELECT_ACCOUNT] });
+
+    const res = await handleOIDCFlowInitiation(
+      makeBaseParams({
+        sessions: [otherOrgSession] as any,
+        sessionCookies: [{ ...staleOtherOrgCookie, id: "session-other" }, staleOrgCookie],
+      }),
+    );
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/accounts");
+  });
+
+  test("should keep /accounts (default prompt) when live sessions are filtered out by org but the cookie has a matching account", async () => {
+    authRequestWith({ scope: ["urn:zitadel:iam:org:id:111111"] });
+
+    const res = await handleOIDCFlowInitiation(
+      makeBaseParams({
+        sessions: [otherOrgSession] as any,
+        sessionCookies: [{ ...staleOtherOrgCookie, id: "session-other" }, staleOrgCookie],
+      }),
+    );
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("/accounts");
+  });
+});
+
 describe("handleOIDCFlowInitiation — Prompt.LOGIN + loginHint requestId prefix", () => {
   let mockGetAuthRequest: ReturnType<typeof vi.fn>;
   let mockConstructUrl: ReturnType<typeof vi.fn>;
@@ -700,7 +878,7 @@ describe("handleOIDCFlowInitiation — Prompt.LOGIN + loginHint requestId prefix
       makeBaseParams({
         requestId: "oidc_abc123",
         sessions: [existingSession] as any,
-        sessionCookies: [{ id: "session-1", token: "tok" }],
+        sessionCookies: [{ id: "session-1", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" }],
       }),
     );
 
@@ -733,7 +911,7 @@ describe("handleOIDCFlowInitiation — Prompt.LOGIN + loginHint requestId prefix
       makeBaseParams({
         requestId: "oidc_abc123",
         sessions: [existingSession] as any,
-        sessionCookies: [{ id: "session-1", token: "tok" }],
+        sessionCookies: [{ id: "session-1", token: "tok", loginName: "", creationTs: "", expirationTs: "", changeTs: "" }],
       }),
     );
 

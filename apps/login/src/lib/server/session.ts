@@ -11,7 +11,7 @@ import {
   listAuthenticationMethodTypes,
   listUsers,
 } from "@/lib/zitadel";
-import { create, Duration } from "@zitadel/client";
+import { Code, create, Duration } from "@zitadel/client";
 import { Challenges, RequestChallenges } from "@zitadel/proto/zitadel/session/v2/challenge_pb";
 import { Session } from "@zitadel/proto/zitadel/session/v2/session_pb";
 import { Checks, ChecksSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb";
@@ -306,14 +306,32 @@ export async function clearSession(options: ClearSessionOptions) {
     return;
   }
 
-  const deleteResponse = await deleteSession({
-    serviceConfig,
-    sessionId: sessionCookie.id,
-    sessionToken: sessionCookie.token,
-  });
-
   const securitySettings = await getSecuritySettings({ serviceConfig });
   const iFrameEnabled = !!securitySettings?.embeddedIframe?.enabled;
+
+  let deleteResponse;
+  try {
+    deleteResponse = await deleteSession({
+      serviceConfig,
+      sessionId: sessionCookie.id,
+      sessionToken: sessionCookie.token,
+    });
+  } catch (error) {
+    // The server-side session may already be gone (e.g. terminated by an
+    // RP-initiated logout): the API answers NotFound, or PermissionDenied because
+    // the cookie's token no longer matches. Prune the cookie entry in that case so
+    // the account card disappears from the selection screen. Any other failure
+    // (transport error, API down) is rethrown: dropping the cookie would orphan a
+    // still-valid server session while the user believes it was removed.
+    if (isClassifiedError(error) && (error.code === Code.NotFound || error.code === Code.PermissionDenied)) {
+      logger.warn("clearSession: session already gone on server, pruning cookie entry", {
+        sessionId: sessionCookie.id,
+        code: error.code,
+      });
+      return removeSessionFromCookie({ session: sessionCookie, iFrameEnabled });
+    }
+    throw error;
+  }
 
   if (!deleteResponse) {
     throw new Error("Could not delete session");
